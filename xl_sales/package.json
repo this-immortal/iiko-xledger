@@ -1,0 +1,21 @@
+{
+  "name": "xl_sales",
+  "version": "1.0.0",
+  "description": "Xledger integration: sales fetcher",
+  "main": "handler.js",
+  "dependencies": {
+    "axios": "^0.19.2",
+    "xl-common-cfg": "file:../lib/config-provider",
+    "csvjson": "5.1.0"
+  },
+  "devDependencies": {
+    "aws-sdk": "^2.688.0",
+    "serverless-pseudo-parameters": "^2.5.0",
+    "serverless-step-functions": "2.19.0"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Vasily Yartsev",
+  "license": "ISC"
+}

@@ -1,0 +1,186 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: xl-sales
+# app and org for use with dashboard.serverless.com
+org: iiko
+
+plugins: 
+  - serverless-pseudo-parameters
+  - serverless-step-functions
+
+custom: 
+  deployment_bucket: xledger-${self:provider.stage}-deployment-${file(./handler.js)):getAccountId}
+  config_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-config
+  data_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-uploads
+  state_machine: xl-sales-fetch-${self:provider.stage}
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, "dev"}
+  region: ${opt:region, "us-east-1"}
+  timeout: 30
+  deploymentBucket: 
+    name: ${self:custom.deployment_bucket}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.config_bucket}/*"
+
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.data_bucket}/*"      
+
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+      Resource: "*"    
+
+functions:
+  invoke:
+    handler: src/Invoke.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      SM_SALES_FETCHER: "arn:aws:states:#{AWS::Region}:#{AWS::AccountId}:stateMachine:${self:custom.state_machine}"  
+    events:
+      - schedule: 
+          enabled: true
+          rate: cron(0 2 * * ? *)      
+          name: ${self:service}-${self:provider.stage}-export-sales
+          description: 'Export sales from iiko'     
+  select_report: 
+    handler: src/SelectReport.handler
+  init_olap: 
+    handler: src/FetchOlap.init
+  check_olap_status: 
+    handler: src/FetchOlap.check
+  fetch_olap_data:
+    handler: src/FetchOlap.fetch
+    environment:
+      DATA_BUCKET: ${self:custom.data_bucket}    
+  make_xml: 
+    handler: src/ConvertToXml.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      DATA_BUCKET: ${self:custom.data_bucket}    
+
+stepFunctions:
+  stateMachines:
+    DataFetcherStateMachine:
+      name: "${self:custom.state_machine}"
+      definition:
+        Comment: "OLAP fetching routine"
+        StartAt: Connect
+        States:
+          Connect: #connect and get connection cookie
+            Type: Task 
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-login"
+            Next: SelectNextStore      
+
+          SelectNextStore:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-select_store"
+            Next: SelectOlap
+
+          SelectOlap:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-select_report"
+            Next: Init
+
+          Init:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-init_olap"
+            Next: Wait
+
+          Wait: 
+            Type: Wait
+            Seconds: 10
+            Next: GetStatus
+
+          GetStatus:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-check_olap_status"
+            ResultPath: "$"
+            Next: CheckStatus
+
+          CheckStatus:
+            Type: Choice
+            Choices: 
+              - Variable: "$.result"
+                BooleanEquals: true
+                Next: "Fetch"
+            Default: CheckAttempts
+
+          CheckAttempts:
+            Type: Choice
+            Choices: 
+              - Variable: "$.index"
+                NumericEquals: 10
+                Next: Timeout
+            Default: Wait
+
+          Fetch:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-fetch_olap_data"
+            ResultPath: "$"
+            Next: CheckIfLastReport
+
+          CheckIfLastReport:
+            Type: Choice
+            Choices: 
+              - Variable: "$.isLastReport"
+                BooleanEquals: true
+                Next: MakeXml
+            Default: SelectOlap
+
+          MakeXml:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-make_xml"
+            Next: UploadXml
+
+          UploadXml:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-xledger-${self:provider.stage}-upload"
+            Next: CheckIfLastStore
+
+          CheckIfLastStore:
+            Type: Choice
+            Choices: 
+              - Variable: "$.isLastStore"
+                BooleanEquals: true
+                Next: Success
+            Default: SelectNextStore
+
+          Success: 
+            Type: Pass
+            Next: Disconnect
+
+          Timeout: 
+            Type: Pass
+            Next: CheckIfLastReport
+
+          Disconnect:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-logout"
+            ResultPath: "$"   
+            End: true

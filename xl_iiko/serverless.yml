@@ -1,0 +1,69 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: xl-iiko
+# app and org for use with dashboard.serverless.com
+
+plugins: 
+  - serverless-pseudo-parameters
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+
+custom: 
+  deployment_bucket: xledger-${self:provider.stage}-deployment-${file(./handler.js)):getAccountId}
+  config_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-config
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, "dev"}
+  region: ${opt:region, "us-east-1"}
+  profile: ${opt:profile, "default"}  
+  deploymentBucket: 
+    name: ${self:custom.deployment_bucket}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.config_bucket}/*"
+
+# you can add packaging information here
+#package:
+#  include:
+#    - include-me.js
+#    - include-me-dir/**
+#  exclude:
+#    - exclude-me.js
+#    - exclude-me-dir/**
+
+functions:
+  login:
+    handler: src/Login.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+  select_store: 
+    handler: src/SelectStore.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}    
+  logout: 
+    handler: src/Logout.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}    
+    
+

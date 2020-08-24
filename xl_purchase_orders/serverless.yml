@@ -1,0 +1,150 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: xl-purchase-orders
+# app and org for use with dashboard.serverless.com
+
+plugins: 
+  - serverless-pseudo-parameters
+  - serverless-step-functions
+
+custom: 
+  deployment_bucket: xledger-${self:provider.stage}-deployment-${file(./handler.js)):getAccountId}
+  config_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-config
+  data_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-uploads
+  state_machine: xl-orders-fetch-${self:provider.stage}
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, "dev"}
+  region: ${opt:region, "us-east-1"}
+  timeout: 30
+  deploymentBucket: 
+    name: ${self:custom.deployment_bucket}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.config_bucket}/*"
+
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.data_bucket}/*"      
+
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+      Resource: "*"    
+
+functions:
+  invoke:
+    handler: src/Invoke.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      SM_ORDER_FETCHER: "arn:aws:states:#{AWS::Region}:#{AWS::AccountId}:stateMachine:${self:custom.state_machine}"  
+    events:
+      - schedule: 
+          enabled: true
+          rate: cron(0 3 * * ? *)      
+          name: ${self:service}-${self:provider.stage}-export-orders
+          description: 'Export purchase orders from iiko'     
+
+  fetch: 
+    handler: src/Fetch.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      DATA_BUCKET: ${self:custom.data_bucket}   
+
+  make_xml: 
+    handler: src/ConvertToXml.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      DATA_BUCKET: ${self:custom.data_bucket}    
+
+  pick_xml: 
+    handler: src/NextFile.handler
+
+stepFunctions:
+  stateMachines:
+    DataFetcherStateMachine:
+      name: "${self:custom.state_machine}"
+      definition:
+        Comment: "Purchse orders fetching routine"
+        StartAt: Connect
+        States:
+          Connect: #connect and get connection cookie
+            Type: Task 
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-login"
+            Next: UpdateMapping      
+
+          UpdateMapping:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-product-mapping-${self:provider.stage}-build-mapping"
+            Next: FetchOrders
+
+          FetchOrders:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-fetch"
+            ResultPath: "$"
+            Next: CheckIfOrdersExist
+
+          CheckIfOrdersExist:
+            Type: Choice
+            Choices: 
+              - Variable: "$.numberOfFiles"
+                NumericLessThan: 1
+                Next: "Success"
+            Default: ConvertToXml
+
+          ConvertToXml:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-make_xml"
+            Next: SelectFile
+
+          SelectFile:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-pick_xml"
+            Next: Upload
+
+          Upload:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-xledger-${self:provider.stage}-upload"
+            ResultPath: "$"
+            Next: CheckIfLastOder
+
+          CheckIfLastOder:
+            Type: Choice
+            Choices: 
+              - Variable: "$.isLastFile"
+                BooleanEquals: true
+                Next: "Success"
+            Default: SelectFile
+
+          Success: 
+            Type: Pass
+            Next: Disconnect
+
+          Disconnect:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-logout"
+            ResultPath: "$"   
+            End: true

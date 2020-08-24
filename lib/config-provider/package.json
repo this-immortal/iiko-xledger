@@ -1,0 +1,8 @@
+{
+    "name": "xl_common_config_provider",
+    "version": "1.0.0",
+    "description": "Xledger integration: common class to work with configuration",
+    "main": "index.js",
+    "author": "Vasily Yartsev",
+    "license": "ISC"
+  }

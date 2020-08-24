@@ -1,0 +1,52 @@
+service: xl-resources
+# app and org for use with dashboard.serverless.com
+org: iiko
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, "dev"}
+  region: ${opt:region, "us-east-1"}
+
+custom: 
+  basename: xl-#{AWS::AccountId}-${self:provider.stage}
+  deployment_bucket: xledger-${self:provider.stage}-deployment-#{AWS::AccountId}
+  config_bucket: ${self:custom.basename}-config
+  data_bucket: ${self:custom.basename}-uploads
+
+resources: 
+  Resources: 
+    DeploymentBucket: 
+      Type: AWS::S3::Bucket
+      Properties: 
+        BucketName: ${self:custom.deployment_bucket}      
+    ConfigBucket:
+      Type: AWS::S3::Bucket
+      Properties: 
+        BucketName: ${self:custom.config_bucket}
+    DataBucket:
+      Type: AWS::S3::Bucket
+      Properties: 
+        BucketName: ${self:custom.data_bucket}
+
+Outputs: 
+  S3DeploymentBucket:
+    Value:
+      Ref: DeploymentBucket
+    Export:
+      Name: xl-deployment-bucket-${self:provider.stage}
+  
+  S3ConfigBucket:
+    Value:
+      Ref: ConfigBucket
+    Export:
+      Name: xl-config-bucket-${self:provider.stage}
+  
+  S3DataBucket:
+    Value:
+      Ref: DataBucket
+    Export:
+      Name: xl-data-bucket-${self:provider.stage}
+
+plugins: 
+  - serverless-pseudo-parameters

@@ -1,0 +1,108 @@
+# Welcome to Serverless!
+#
+# This file is the main config file for your service.
+# It's very minimal at this point and uses default values.
+# You can always add more config options for more control.
+# We've included some commented out config examples here.
+# Just uncomment any of them to get that config option.
+#
+# For full config options, check the docs:
+#    docs.serverless.com
+#
+# Happy Coding!
+
+service: xl-product-mapping
+# app and org for use with dashboard.serverless.com
+
+plugins: 
+  - serverless-pseudo-parameters
+  - serverless-step-functions
+
+# You can pin your service to only deploy with a specific Serverless version
+# Check out our docs for more details
+# frameworkVersion: "=X.X.X"
+
+custom: 
+  deployment_bucket: xledger-${self:provider.stage}-deployment-${file(./handler.js)):getAccountId}
+  config_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-config
+  data_bucket: xl-#{AWS::AccountId}-${self:provider.stage}-uploads
+  state_machine: xl-mapping-sync-${self:provider.stage}
+
+provider:
+  name: aws
+  runtime: nodejs12.x
+  stage: ${opt:stage, "dev"}
+  region: ${opt:region, "us-east-1"}
+  deploymentBucket: 
+    name: ${self:custom.deployment_bucket}
+
+  iamRoleStatements:
+    - Effect: Allow
+      Action:
+        - s3:PutObject
+        - s3:PutObjectAcl
+        - s3:GetObject
+        - s3:GetObjectAcl  
+      Resource: "arn:aws:s3:::${self:custom.config_bucket}/*"
+
+    - Effect: Allow
+      Action:
+        - states:StartExecution
+      Resource: "*"       
+
+# you can add packaging information here
+#package:
+include:
+  - src/**
+  - ../../lib/*.js
+  - handler.js  
+#  exclude:
+#    - exclude-me.js
+#    - exclude-me-dir/**
+
+functions:
+  invoke:
+    handler: src/Invoke.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+      SM_PRODUCT_MAPPING: "arn:aws:states:#{AWS::Region}:#{AWS::AccountId}:stateMachine:${self:custom.state_machine}"  
+    events:
+      - schedule: 
+          enabled: true
+          rate: cron(0 1 * * ? *)      
+          name: ${self:service}-${self:provider.stage}-build-product-mapping
+          description: 'Create product mapping' 
+
+  build-mapping:
+    handler: src/UpdateMapping.handler
+    environment:
+      CONFIG_BUCKET: ${self:custom.config_bucket}
+
+stepFunctions:
+  stateMachines:
+    DataFetcherStateMachine:
+      name: ${self:custom.state_machine}
+      definition:
+        Comment: "Product Mapping fetching routine"
+        StartAt: Connect
+        States:
+          Connect: #connect and get connection cookie
+            Type: Task 
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-login"
+            Next: Fetch  
+
+          Fetch:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:${self:service}-${self:provider.stage}-build-mapping"
+            ResultPath: "$"
+            Next: Disconnect
+
+          Disconnect:
+            Type: Task
+            Resource: "arn:aws:lambda:#{AWS::Region}:#{AWS::AccountId}:function:xl-iiko-${self:provider.stage}-logout"
+            ResultPath: "$"   
+            End: true
+
+
+    
+
