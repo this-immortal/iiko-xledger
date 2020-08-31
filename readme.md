@@ -180,25 +180,20 @@ Serverless: Checking Stack update progress..........................
 Serverless: Stack update finished...
 
 Service Information
-service: aws-integration
+service: xl-purchase-orders
 stage: dev
 region: us-east-1
-stack: aws-integration-dev
+stack: xl-purchase-orders-dev
 resources: 39
 api keys:
   None
 endpoints:
   None
 functions:
-  invoke_mapping_update: aws-integration-dev-invoke_mapping_update
-  invoke_export: aws-integration-dev-invoke_export
-  xl_auth: aws-integration-dev-xl_auth
-  update_product_mapping: aws-integration-dev-update_product_mapping
-  read_product_mapping: aws-integration-dev-read_product_mapping
-  fetch_orders_from_iiko: aws-integration-dev-fetch_orders_from_iiko
-  s3_watcher: aws-integration-dev-s3_watcher
-  convert_to_xml: aws-integration-dev-convert_to_xml
-  xl_upload: aws-integration-dev-xl_upload
+  invoke: xl-purchase-orders-dev-invoke
+  fetch: xl-purchase-orders-dev-fetch
+  make_xml: xl-purchase-orders-dev-make_xml
+  pick_xml: xl-purchase-orders-dev-pick_xml
 layers:
   None
   
@@ -217,7 +212,7 @@ If all went well, you should now see 3 state machines and a bunch of Lambda func
 
 ## Remove the application
 
-If you'd like to remove an application from AWS, just run the ```remove.sh```
+If you'd like to remove the application from AWS, just run the ```remove.sh```
 
 ```bash
 ./ remove.sh
